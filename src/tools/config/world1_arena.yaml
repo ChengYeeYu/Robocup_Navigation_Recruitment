@@ -1,0 +1,15 @@
+# Official TurtleBot3 "turtlebot3_world" arena; no walls: list needed.
+name: world1_arena
+description: "Official TurtleBot3 'turtlebot3_world' arena. Easiest world."
+# robot_start_pose is in GAZEBO WORLD frame -- used to physically spawn the
+# robot (see WORLD_SPAWN_POSE in bringup.launch.py). The official stock TB3
+# tutorial spawn; physically safe (0.9m clear of the nearest pillar).
+robot_start_pose: {x: -2.0, y: -0.5, yaw_deg: 0}
+# amcl_initial_pose is in MAP frame -- used to seed AMCL localization
+# (benchmark.py, or manual /initialpose). NOT the same numbers as
+# robot_start_pose: this map's frame is offset from Gazebo's world frame by
+# (dx=+2.0, dy=+0.47) -- measured directly by matching all 9 pillars'
+# pixel positions in the saved map against their known real Gazebo
+# coordinates (consistent to within ~1cm across all 9). No rotation
+# offset was found. This is amcl_initial_pose = robot_start_pose + (2.0, 0.47).
+amcl_initial_pose: {x: 0.0, y: -0.03, yaw_deg: 0}

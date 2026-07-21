@@ -1,0 +1,32 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypemirror="http://relaxng.org/ns/structure/1.0"?>
+<package format="3">
+  <name>planner_py</name>
+  <version>1.0.0</version>
+  <description>
+    Freshman-editable Python global planner. A standalone action server
+    implementing nav2_msgs/action/ComputePathToPose, launched in place of
+    nav2's planner_server. Only custom_planner.generate_path() is meant to
+    be edited by students -- all node/action-server boilerplate is already
+    implemented.
+  </description>
+  <maintainer email="jingyang040306@gmail.com">RoboCup Team</maintainer>
+  <license>Apache-2.0</license>
+
+  <depend>rclpy</depend>
+  <depend>nav2_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>builtin_interfaces</depend>
+  <depend>tf2_ros</depend>
+  <depend>python3-numpy</depend>
+
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

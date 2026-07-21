@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypemirror="http://relaxng.org/ns/structure/1.0"?>
+<package format="3">
+  <name>bringup</name>
+  <version>1.0.0</version>
+  <description>
+    RoboCup Nav2 teaching starter kit: Gazebo worlds, maps, params, and the
+    top-level launch files that bring up TurtleBot3 + Nav2 with a
+    zero-config default planner or a freshie-supplied C++/Python planner.
+  </description>
+  <maintainer email="jingyang040306@gmail.com">RoboCup Team</maintainer>
+  <license>Apache-2.0</license>
+
+  <exec_depend>nav2_bringup</exec_depend>
+  <exec_depend>turtlebot3_gazebo</exec_depend>
+  <exec_depend>gazebo_ros</exec_depend>
+  <exec_depend>rviz2</exec_depend>
+  <exec_depend>slam_toolbox</exec_depend>
+  <exec_depend>planner_cpp</exec_depend>
+  <exec_depend>planner_py</exec_depend>
+
+  <test_depend>ament_lint_common</test_depend>
+  <test_depend>ament_lint_auto</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

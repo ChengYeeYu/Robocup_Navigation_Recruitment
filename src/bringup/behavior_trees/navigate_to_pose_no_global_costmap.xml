@@ -1,0 +1,40 @@
+<!--
+  Used ONLY when planner:=python_custom. A trimmed copy of nav2_bt_navigator's
+  stock navigate_to_pose_w_replanning_and_recovery.xml, with every
+  "global_costmap/clear_entirely_global_costmap" ClearEntireCostmap node
+  removed (replaced with a no-op Wait where a RecoveryNode's second child is
+  required). This is necessary because in python_custom mode planner_server,
+  and therefore its embedded global_costmap and costmap-clearing services,
+  never runs; see bringup's navigation.launch.py and structure.md's
+  "python_custom" section. Local costmap clearing (served by controller_server,
+  which always runs) is unaffected and left as-is.
+-->
+<root main_tree_to_execute="MainTree">
+  <BehaviorTree ID="MainTree">
+    <RecoveryNode number_of_retries="6" name="NavigateRecovery">
+      <PipelineSequence name="NavigateWithReplanning">
+        <RateController hz="1.0">
+          <RecoveryNode number_of_retries="1" name="ComputePathToPose">
+            <ComputePathToPose goal="{goal}" path="{path}" planner_id="GridBased"/>
+            <Wait wait_duration="0.1" name="NoGlobalCostmapToClear"/>
+          </RecoveryNode>
+        </RateController>
+        <RecoveryNode number_of_retries="1" name="FollowPath">
+          <FollowPath path="{path}" controller_id="FollowPath"/>
+          <ClearEntireCostmap name="ClearLocalCostmap-Context" service_name="local_costmap/clear_entirely_local_costmap"/>
+        </RecoveryNode>
+      </PipelineSequence>
+      <ReactiveFallback name="RecoveryFallback">
+        <GoalUpdated/>
+        <RoundRobin name="RecoveryActions">
+          <Sequence name="ClearingActions">
+            <ClearEntireCostmap name="ClearLocalCostmap-Subtree" service_name="local_costmap/clear_entirely_local_costmap"/>
+          </Sequence>
+          <Spin spin_dist="1.57"/>
+          <Wait wait_duration="5"/>
+          <BackUp backup_dist="0.30" backup_speed="0.05"/>
+        </RoundRobin>
+      </ReactiveFallback>
+    </RecoveryNode>
+  </BehaviorTree>
+</root>

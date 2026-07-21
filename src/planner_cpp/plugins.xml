@@ -1,0 +1,5 @@
+<library path="planner_cpp_plugin">
+  <class name="planner_cpp/CustomPlanner" type="planner_cpp::CustomPlanner" base_class_type="nav2_core::GlobalPlanner">
+    <description>Teaching custom global planner (freshman-editable computePlan()).</description>
+  </class>
+</library>

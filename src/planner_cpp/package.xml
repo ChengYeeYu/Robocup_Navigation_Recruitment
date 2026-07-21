@@ -1,0 +1,33 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypemirror="http://relaxng.org/ns/structure/1.0"?>
+<package format="3">
+  <name>planner_cpp</name>
+  <version>1.0.0</version>
+  <description>
+    Freshman-editable Nav2 global planner pluginlib plugin. Only
+    CustomPlanner::computePlan() is meant to be edited by students -- all
+    lifecycle/registration boilerplate is already implemented.
+  </description>
+  <maintainer email="jingyang040306@gmail.com">RoboCup Team</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>rclcpp</depend>
+  <depend>rclcpp_lifecycle</depend>
+  <depend>nav2_core</depend>
+  <depend>nav2_costmap_2d</depend>
+  <depend>nav2_util</depend>
+  <depend>pluginlib</depend>
+  <depend>nav_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>tf2_ros</depend>
+
+  <test_depend>ament_lint_common</test_depend>
+  <test_depend>ament_lint_auto</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+    <nav2_core plugin="${prefix}/plugins.xml" />
+  </export>
+</package>

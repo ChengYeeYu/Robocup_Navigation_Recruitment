@@ -1,0 +1,12 @@
+# Goal setting for each world
+world1_arena:
+  - {x: 1.5, y: 1.5, label: near_obstacle}
+  - {x: 4.0, y: 1.0, label: open_corner}
+
+world2_house:
+  - {x: 5.994884014129639, y: -4.133320331573486, label: point_A}
+  - {x: 6.0450439453125, y: 0.997012197971344, label: point_B}
+  - {x: 1.1095850467681885, y: 3.238022565841675, label: point_C}
+  - {x: -2.7150087356567383, y: 4.028862476348877, label: point_D}
+  - {x: -6.042925834655762, y: 3.530674695968628, label: point_E}
+  - {x: -6.3945465087890625, y: -2.7847845554351807, label: point_F}
