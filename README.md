@@ -1,5 +1,10 @@
 # RoboCup Nav2 Starter Kit
 
+> **TL;DR:** `sudo bash src/tools/install_dependencies.sh` -> `colcon build
+> --symlink-install` -> `ros2 launch bringup bringup.launch.py` -> click **2D
+> Pose Estimate** then **Nav2 Goal** in RViz. No code required. Want to write
+> your own planner? Jump to [S4](#4-rules-for-writing-your-own-planner).
+
 A TurtleBot3 + Nav2 simulation starter kit. Run it as-is and it just works
 -- no code needed. If you want to write your own path-planning algorithm,
 in **C++ or Python**, you can plug it in with one launch argument, editing
@@ -21,8 +26,7 @@ sudo bash src/tools/install_dependencies.sh
 Open a new terminal and check it worked:
 
 ```bash
-ros2 --version
-gazebo --version
+echo $ROS_DISTRO
 ```
 
 (Already have ROS 2 Humble + Gazebo + Nav2 installed? Skip this step.)
@@ -77,7 +81,7 @@ the same contract:
 | 4 | Be fast | Must return within ~10 seconds. No infinite loops, no waiting for user input. |
 | 5 | Don't touch anything else in Nav2 | No editing costmap, controller, or localization settings -- only the path-planning step is yours. |
 | 6 | No new dependencies | Beyond what's already installed. |
-| 7 | Don't delete the starter code | It's the straight-line fallback your algorithm is compared against. |
+| 7 | Don't delete the starter code | It's the baseline your algorithm is compared against (a straight line in C++, a clearance-aware A* in Python -- see each track's section below). |
 
 ### Inputs & outputs
 
@@ -111,13 +115,15 @@ Helper methods on `grid` / `costmap_`:
 | `grid.is_occupied(gx, gy)` | `costmap_->getCost(mx, my)` | Is this cell blocked? |
 | `grid.world_to_grid(x, y)` | `costmap_->worldToMap(...)` | Real coords → grid cell. |
 | `grid.grid_to_world(gx, gy)` | `costmap_->mapToWorld(...)` | Grid cell → real coords. |
+| `grid.cost(gx, gy)` / `grid.move_cost(a, b)` | `costmap_->getCost(mx, my)` | Traversal cost: `None` on a wall, `1.0` in the open, rising near walls -- use this instead of `is_occupied` if you want your search to prefer clearance from obstacles (Python only; the C++ costmap already carries this via inflation). |
 
 ### Suggested approach (works for any algorithm)
 
-The starter code just draws a straight line, which cuts through walls. These
-steps are the general shape of a planner that actually avoids obstacles --
-they apply whether you implement BFS, Dijkstra, A*, RRT, or anything else,
-in either language:
+The C++ starter code just draws a straight line, which cuts through walls
+(the Python starter is already a clearance-aware A*, see §6). These steps
+are the general shape of a planner that actually avoids obstacles -- they
+apply whether you implement BFS, Dijkstra, A*, RRT, or anything else, in
+either language:
 
 1. **Convert start/goal to grid cells.** Use `grid.world_to_grid(x, y)`
    (Python) or `costmap_->worldToMap(wx, wy, mx, my)` (C++) to turn the
@@ -170,7 +176,7 @@ This is a standard [Nav2 planner plugin](https://navigation.ros.org/plugin_tutor
    ros2 launch bringup bringup.launch.py planner:=python_custom
    ```
 
-**Note:** your Python planner only sees the static map, not a live obstacle-inflated costmap like the C++ track does. If you want closer parity, use `grid.is_occupied(...)` to add your own safety margin around obstacles.
+**Note:** your Python planner only sees the static map, not a live obstacle-inflated costmap like the C++ track does. To close that gap, `grid` still gives you a *static* approximation of wall clearance -- `grid.cost(gx, gy)`/`grid.move_cost(a, b)` (see the helper table in §4) return a cost that rises near walls, computed once from the map. The starter code already searches by minimizing this cost instead of just avoiding blocked cells, which is why it can actually reach goals a plain `is_occupied`-only search would fail to drive to (the controller can't track a plan that hugs walls too closely). It's still not the live costmap -- it won't react to anything that isn't in the static map.
 
 ## 7. Check your planner's quality
 
@@ -193,7 +199,7 @@ both start their own Gazebo, and they'll conflict.
 
 | Counts for | Weight | Rewards |
 |---|---|---|
-| Path directness | 40% | Close to straight-line distance |
+| Path directness | 40% | Close to the stock planner's own path length for that goal |
 | Planning speed | 30% | Returning a plan quickly |
 | Navigation speed | 30% | Actually driving there quickly |
 
@@ -209,3 +215,4 @@ actually reach the goal. See
 | `KeyError: 'TURTLEBOT3_MODEL'` | This terminal doesn't have the env var set -- run `export TURTLEBOT3_MODEL=burger` in it (see step 2). Needed in *every* new terminal, not just the one you first built in. |
 | C++ changes don't show up | Rebuild (`colcon build --packages-select planner_cpp`) and `source install/setup.bash` again. |
 | Gazebo won't close / next launch fails | `pkill -9 gzserver; pkill -9 gzclient`, then try again. |
+| `world2_house` first launch shows "Gazebo Not Responding" | Expected -- it's loading several meshes it hasn't cached yet, can take 1-3 minutes. Don't force-quit, just wait. (`install_dependencies.sh` pre-fetches these so this normally shouldn't happen; if it does, the fetch may have failed at install time, e.g. no network.) |

@@ -14,7 +14,7 @@ from launch_ros.substitutions import FindPackageShare
 # since installed launch files can't read src/tools/ at runtime.
 WORLD_SPAWN_POSE = {
     'world1_arena': {'x': '-2.0', 'y': '-0.5', 'yaw': str(math.radians(0))},
-    'world2_house': {'x': '0.0', 'y': '0.0', 'yaw': str(math.radians(0))},
+    'world2_house': {'x': '-1.4073', 'y': '3.8644', 'yaw': str(math.radians(0))},
 }
 
 

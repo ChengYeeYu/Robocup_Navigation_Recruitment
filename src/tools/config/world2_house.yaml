@@ -1,6 +1,8 @@
 # Official TurtleBot3 "turtlebot3_house"; no walls: list needed.
 name: world2_house
 description: "Official TurtleBot3 'turtlebot3_house' floorplan. Harder than world1_arena."
-# (0,0), not the stock (-2.0,-0.5) tutorial pose -- that lands on an
-# occupied cell in our SLAM-built map after loop-closure drift.
-robot_start_pose: {x: 0.0, y: 0.0, yaw_deg: 0}
+# Not the stock (-2.0,-0.5) tutorial pose -- that lands on an occupied cell
+# in our SLAM-built map after loop-closure drift. Picked via RViz's
+# "Publish Point" tool + `ros2 topic echo /clicked_point`, verified free
+# with margin (see src/bringup/maps/world2_house.pgm).
+robot_start_pose: {x: -1.4073, y: 3.8644, yaw_deg: 0}

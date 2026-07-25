@@ -121,9 +121,18 @@ components (weights live in `SCORE_WEIGHTS` near the top of
 
 | Component | Weight | Formula | Rewards |
 |---|---|---|---|
-| Path efficiency | 40% | `100 / length_ratio` | A direct path, close to straight-line distance |
+| Path efficiency | 40% | `100 / length_ratio` | A direct path, close to the stock `default` planner's own path length for that goal (`length_ratio = path_length_m / reference_length_m`; not straight-line distance, since that's rarely achievable once walls are in the way -- see below) |
 | Planning speed | 30% | `100 * (1 - plan_time_sec / 10)` | Returning a plan quickly (10s budget matches README's planner rules) |
 | Navigation speed | 30% | `100 * (1 - nav_time_sec / nav_timeout)` | Actually driving there quickly |
+
+**Where the reference length comes from:** for every world, `benchmark.py`
+always runs the stock `default` planner first (even if you didn't ask for
+it in `--planners`) and records its `path_length_m` per goal. That becomes
+`reference_length_m` for every other planner's `length_ratio` on that same
+goal -- reusing NavfnPlanner's own path (planned against the real inflated
+costmap) as "what a good path looks like here" instead of an unreachable
+straight line. If `default` itself couldn't solve a goal, that one goal
+falls back to straight-line distance (a warning prints when this happens).
 
 Each component is clamped to `[0, 100]` before weighting, so a slow-but-direct
 path and a fast-but-wandering path can end up with similar scores --
@@ -149,20 +158,22 @@ world            # world this row is about
 planner          # default / cpp_custom / python_custom
 
 # --- detail rows only ---
-goal_label       # label from src/tools/goals.yaml
-goal_x, goal_y   # goal position, 'map' frame, meters
-plan_success     # True/False -- did ComputePathToPose return a path
-plan_time_sec    # time for that ComputePathToPose call to return
-path_length_m    # arc length of the returned path
-straight_line_m  # straight-line distance, path's actual start to goal
-length_ratio     # path_length_m / straight_line_m
-nav_result       # SUCCEEDED / FAILED / CANCELED / TIMEOUT
-nav_time_sec     # time from sending the NavigateToPose goal to it finishing
-score            # 0-100, this goal's weighted quality score -- see
-                 # SCORE_WEIGHTS in benchmark.py. 0 if plan_success is
-                 # False or nav_result isn't SUCCEEDED; otherwise a
-                 # weighted mix of path efficiency, planning speed, and
-                 # navigation speed.
+goal_label          # label from src/tools/goals.yaml
+goal_x, goal_y      # goal position, 'map' frame, meters
+plan_success        # True/False -- did ComputePathToPose return a path
+plan_time_sec       # time for that ComputePathToPose call to return
+path_length_m       # arc length of the returned path
+reference_length_m  # the stock default planner's own path_length_m for
+                    # this goal (falls back to straight-line distance if
+                    # default itself couldn't solve this goal)
+length_ratio        # path_length_m / reference_length_m
+nav_result          # SUCCEEDED / FAILED / CANCELED / TIMEOUT
+nav_time_sec        # time from sending the NavigateToPose goal to it finishing
+score               # 0-100, this goal's weighted quality score -- see
+                    # SCORE_WEIGHTS in benchmark.py. 0 if plan_success is
+                    # False or nav_result isn't SUCCEEDED; otherwise a
+                    # weighted mix of path efficiency, planning speed, and
+                    # navigation speed.
 
 # --- summary rows only ---
 goals               # number of goals tested for this world/planner
