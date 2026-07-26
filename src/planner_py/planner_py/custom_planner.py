@@ -4,6 +4,10 @@ from geometry_msgs.msg import PoseStamped
 from planner_py.occupancy_grid_view import OccupancyGridView
 
 
+def _heuristic(a, b):
+    return ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5
+
+
 def generate_path(
     start_pose: PoseStamped,
     goal_pose: PoseStamped,

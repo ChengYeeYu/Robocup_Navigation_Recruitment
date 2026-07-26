@@ -1,5 +1,6 @@
 """Boilerplate action server (freshies do NOT edit): drop-in replacement for planner_server."""
 import time
+import traceback
 
 import rclpy
 from builtin_interfaces.msg import Duration
@@ -100,7 +101,10 @@ class ComputePathToPoseServer(Node):
         try:
             waypoints = generate_path(start_pose, goal_pose, grid)
         except Exception as exc:  # noqa: BLE001 -- a buggy student planner must not crash the node
-            self.get_logger().error(f'custom_planner.generate_path() raised: {exc}')
+            self.get_logger().error(
+                'custom_planner.generate_path() raised an exception -- this is a '
+                'bug in your planner, not the harness. Traceback:\n'
+                + traceback.format_exc())
             raise PlanningFailed from exc
         if not waypoints:
             raise PlanningFailed

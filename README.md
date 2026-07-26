@@ -190,12 +190,12 @@ x/y you write `start_pose.pose.position.x` (Python) or
 
 Helper methods on `grid` / `costmap_`:
 
-| Python                                       | C++                         | Meaning                                                                                                                                                                                                                                   |
-| -------------------------------------------- | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `grid.is_occupied(gx, gy)`                   | `costmap_->getCost(mx, my)` | Is this cell blocked?                                                                                                                                                                                                                     |
-| `grid.world_to_grid(x, y)`                   | `costmap_->worldToMap(...)` | Real coords → grid cell.                                                                                                                                                                                                                  |
-| `grid.grid_to_world(gx, gy)`                 | `costmap_->mapToWorld(...)` | Grid cell → real coords.                                                                                                                                                                                                                  |
-| `grid.cost(gx, gy)` / `grid.move_cost(a, b)` | `costmap_->getCost(mx, my)` | Traversal cost: `None` on a wall, `1.0` in the open, rising near walls -- use this instead of `is_occupied` if you want your search to prefer clearance from obstacles (Python only; the C++ costmap already carries this via inflation). |
+| Python                                         | C++                         | Meaning                                                                                                                                                                                                                                                                                                                                                                                      |
+| ---------------------------------------------- | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `grid.is_occupied(gx, gy)`                     | `costmap_->getCost(mx, my)` | Is this cell blocked?                                                                                                                                                                                                                                                                                                                                                                        |
+| `grid.world_to_grid(x, y)`                     | `costmap_->worldToMap(...)` | Real coords → grid cell.                                                                                                                                                                                                                                                                                                                                                                     |
+| `grid.grid_to_world(gx, gy)`                   | `costmap_->mapToWorld(...)` | Grid cell → real coords.                                                                                                                                                                                                                                                                                                                                                                     |
+| `grid.cost(gx, gy)` / `grid.move_cost(gx, gy)` | `costmap_->getCost(mx, my)` | Traversal cost for entering cell `(gx, gy)`: `None` on a wall, `1.0` in the open, rising near walls -- use this instead of `is_occupied` if you want your search to prefer clearance from obstacles (Python only; the C++ costmap already carries this via inflation). Both take the **same `(gx, gy)` args as `is_occupied`** -- e.g. for a neighbour tuple `n`, call `grid.move_cost(*n)`. |
 
 ### Getting unstuck
 
@@ -240,7 +240,7 @@ This is a standard [Nav2 planner plugin](https://navigation.ros.org/plugin_tutor
    ros2 launch bringup bringup.launch.py planner:=python_custom
    ```
 
-**Note:** your Python planner only sees the static map, not a live obstacle-inflated costmap like the C++ track does. To close that gap, `grid` still gives you a _static_ approximation of wall clearance -- `grid.cost(gx, gy)`/`grid.move_cost(a, b)` (see the helper table in §4) return a cost that rises near walls, computed once from the map. If your search _minimizes this cost_ instead of just avoiding blocked cells, it can reach goals a plain `is_occupied`-only search would fail to drive to -- the controller can't track a plan that hugs walls too closely, so keeping clearance matters.
+**Note:** your Python planner only sees the static map, not a live obstacle-inflated costmap like the C++ track does. To close that gap, `grid` still gives you a _static_ approximation of wall clearance -- `grid.cost(gx, gy)`/`grid.move_cost(gx, gy)` (see the helper table in §4) return a cost that rises near walls, computed once from the map. If your search _minimizes this cost_ instead of just avoiding blocked cells, it can reach goals a plain `is_occupied`-only search would fail to drive to -- the controller can't track a plan that hugs walls too closely, so keeping clearance matters.
 
 ## 7. Check your planner's quality
 
@@ -275,7 +275,7 @@ Beyond speed and directness, your planner is also checked for **robustness** on
 impossible or invalid goals -- an unreachable (walled-off) goal, a goal on a
 wall, a goal off the map, a start on a wall, a goal equal to the start. On
 these it must **return an empty path** and must **not crash, hang, or fabricate
-a route** (rules 3 and 4). The straight-line C++ starter fails these by design;
+a route** (rules 3 and 4). The straight-line starter fails these by design;
 a real search should give up cleanly.
 
 ## 8. What to submit

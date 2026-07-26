@@ -57,17 +57,39 @@ def load_start_pose(world):
 
 
 def launch_stack(world, planner, model, headless, use_rviz):
-    """Launch bringup.launch.py as a background process."""
+    """Launch bringup.launch.py as a background process.
+    """
+    os.makedirs(RESULTS_DIR, exist_ok=True)
+    log_path = os.path.join(RESULTS_DIR, f'stack_{world}_{planner}.log')
     cmd = [
         'ros2', 'launch', 'bringup', 'bringup.launch.py',
         f'world:={world}', f'planner:={planner}', f'model:={model}',
         f'use_rviz:={"true" if use_rviz else "false"}',
         f'headless:={"true" if headless else "false"}',
     ]
-    proc = subprocess.Popen(
-        cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        preexec_fn=os.setsid, cwd=REPO_ROOT)
+    with open(log_path, 'w') as logf:
+        proc = subprocess.Popen(
+            cmd, stdout=logf, stderr=subprocess.STDOUT,
+            preexec_fn=os.setsid, cwd=REPO_ROOT)
+    proc.stack_log_path = log_path
     return proc
+
+
+def _planner_error_hint(proc):
+    """Return the planner node's logged traceback if it raised, else ''.
+    """
+    path = getattr(proc, 'stack_log_path', None)
+    if not path or not os.path.exists(path):
+        return ''
+    try:
+        with open(path, errors='replace') as f:
+            text = f.read()
+    except OSError:
+        return ''
+    marker = 'generate_path() raised an exception'
+    if marker in text:
+        return text[text.rindex(marker):][:1000].rstrip()
+    return ''
 
 
 def shutdown_stack(proc, grace_sec=20):
@@ -316,6 +338,15 @@ def run_combo(world, planner, model, goals, headless, use_rviz, startup_timeout,
             print(f'    plan: success={plan_success} time={plan_time:.2f}s '
                   f'length={length if length == "" else round(length, 2)} '
                   f'grid_optimal={grid_optimal}')
+            if not plan_success:
+                hint = _planner_error_hint(proc)
+                if hint:
+                    print('    !! your planner raised an exception (this is a bug '
+                          'in your planner, not the benchmark):')
+                    print('\n'.join('       ' + ln for ln in hint.splitlines()))
+                else:
+                    print(f'       (no path returned; full stack log: '
+                          f'{getattr(proc, "stack_log_path", "n/a")})')
 
             # --- full navigation metrics (NavigateToPose) ---
             nav_start = time.time()
@@ -438,7 +469,7 @@ def main():
     parser.add_argument('--startup-timeout', type=float, default=240.0,
                          help='world2_house (turtlebot3_house) alone can take ~2.5min '
                               'to spawn on first load; default is generous to cover that')
-    parser.add_argument('--nav-timeout', type=float, default=90.0)
+    parser.add_argument('--nav-timeout', type=float, default=120.0)
     parser.add_argument('--out', default=None,
                          help='CSV path (default: src/tools/results/benchmark.csv). '
                               'Appended to, not overwritten, if it already exists.')

@@ -93,6 +93,11 @@ class OccupancyGridView:
             return 1.0
         return 1.0 + (self._INFLATION_RADIUS_M / max(clearance_m, self.resolution)) ** 2
 
-    def move_cost(self, from_cell: tuple, to_cell: tuple):
-        """Cost of stepping from from_cell into the adjacent to_cell; None if to_cell is blocked."""
-        return self.cost(*to_cell)
+    def move_cost(self, gx: int, gy: int):
+        """Cost of stepping INTO cell (gx, gy); None if blocked. Alias for cost().
+
+        Takes the same (gx, gy) coordinates as cost() and is_occupied() -- pass
+        the cell you're moving into, e.g. `grid.move_cost(*neighbor)` where
+        `neighbor` is a (gx, gy) tuple.
+        """
+        return self.cost(gx, gy)
