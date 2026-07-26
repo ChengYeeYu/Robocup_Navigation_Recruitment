@@ -25,12 +25,11 @@ ALL_PLANNERS = ['default', 'cpp_custom', 'python_custom']
 # planner. Failure (no plan, or nav doesn't SUCCEED) scores 0 -- a planner
 # that can't reliably finish the task shouldn't score decently just for
 # being fast on the runs it does complete. Successful runs are scored on:
-#   path_efficiency -- how direct the path is (100 / length_ratio), where
-#     length_ratio = path_length_m / reference_length_m; the reference is
-#     the stock 'default' planner's own path length for that same goal
-#     (not straight-line distance -- straight-line is rarely achievable
-#     once walls are in the way, which unfairly caps efficiency on tighter
-#     worlds). The core "is this a good plan" signal, weighted highest.
+#   path_efficiency -- how close the path length is to the grid-optimal
+#     (shortest 8-connected free-cell) path: 100 * grid_optimal_m /
+#     path_length_m, falling back to the straight-line ratio only if the
+#     grid optimum can't be computed. The core "is this a good plan"
+#     signal, weighted highest.
 #   plan_speed -- scaled against the ~10s budget already stated in
 #     README's planner rules ("must return within ~10 seconds").
 #   nav_speed -- scaled against --nav-timeout.
@@ -160,12 +159,83 @@ def path_length(path):
     return sum(math.hypot(x2 - x1, y2 - y1) for (x1, y1), (x2, y2) in zip(pts, pts[1:]))
 
 
+def reference_optimal_length(gv, sx, sy, gx, gy):
+    """Shortest 8-connected grid path length (m) over free cells, start->goal.
+
+    The geometric grid optimum -- what the best possible planner could return
+    on this map. Used to score path efficiency against an *achievable* target
+    instead of the (unreachable-on-a-grid) Euclidean straight line. None if
+    either endpoint is blocked or no path exists.
+    """
+    import heapq
+    start = gv.world_to_grid(sx, sy)
+    goal = gv.world_to_grid(gx, gy)
+    if gv.is_occupied(*goal) or gv.is_occupied(*start):
+        return None
+    res = gv.resolution
+    diag = math.sqrt(2)
+    nbrs = [(1, 0, 1.0), (-1, 0, 1.0), (0, 1, 1.0), (0, -1, 1.0),
+            (1, 1, diag), (1, -1, diag), (-1, 1, diag), (-1, -1, diag)]
+
+    def h(c):
+        return math.hypot(c[0] - goal[0], c[1] - goal[1]) * res
+
+    g = {start: 0.0}
+    open_heap = [(h(start), start)]
+    while open_heap:
+        _, cur = heapq.heappop(open_heap)
+        if cur == goal:
+            return g[cur]
+        for dx, dy, step in nbrs:
+            nxt = (cur[0] + dx, cur[1] + dy)
+            if gv.is_occupied(*nxt):
+                continue
+            tentative = g[cur] + step * res
+            if nxt not in g or tentative < g[nxt]:
+                g[nxt] = tentative
+                heapq.heappush(open_heap, (tentative + h(nxt), nxt))
+    return None
+
+
+def _load_grid_view(navigator, timeout_sec=10.0):
+    """Subscribe to the static /map and wrap it; None if unavailable."""
+    import rclpy
+    from nav_msgs.msg import OccupancyGrid
+    from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy
+    from planner_py.occupancy_grid_view import OccupancyGridView
+
+    holder = {}
+    qos = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL,
+                     reliability=ReliabilityPolicy.RELIABLE)
+    sub = navigator.create_subscription(
+        OccupancyGrid, '/map', lambda m: holder.setdefault('m', m), qos)
+    deadline = time.time() + timeout_sec
+    while 'm' not in holder and time.time() < deadline:
+        rclpy.spin_once(navigator, timeout_sec=0.5)
+    navigator.destroy_subscription(sub)
+    if 'm' not in holder:
+        print('  (no /map received; grid-optimal scoring off, using straight-line)')
+        return None
+    try:
+        return OccupancyGridView(holder['m'])
+    except Exception as exc:  # noqa: BLE001
+        print(f'  (grid-optimal scoring off: {exc})')
+        return None
+
+
 def compute_score(row, nav_timeout):
     """Compute a goal's 0-100 weighted quality score (see SCORE_WEIGHTS above)."""
     if not row['plan_success'] or row['nav_result'] != 'SUCCEEDED':
         return 0.0
-    ratio = row['length_ratio']
-    efficiency = 100.0 if ratio in ('', None) else max(0.0, min(100.0, 100.0 / ratio))
+    # Path efficiency vs the OPTIMAL GRID path (achievable), falling back to the
+    # old straight-line ratio if the optimal couldn't be computed.
+    opt = row.get('grid_optimal_m')
+    plen = row.get('path_length_m')
+    if isinstance(opt, (int, float)) and isinstance(plen, (int, float)) and plen > 1e-6:
+        efficiency = max(0.0, min(100.0, 100.0 * opt / plen))
+    else:
+        ratio = row['length_ratio']
+        efficiency = 100.0 if ratio in ('', None) else max(0.0, min(100.0, 100.0 / ratio))
     plan_speed = max(0.0, min(100.0, 100.0 * (1.0 - row['plan_time_sec'] / PLAN_TIME_BUDGET_SEC)))
     nav_speed = max(0.0, min(100.0, 100.0 * (1.0 - row['nav_time_sec'] / nav_timeout)))
     return round(
@@ -173,32 +243,6 @@ def compute_score(row, nav_timeout):
         + SCORE_WEIGHTS['plan_speed'] * plan_speed
         + SCORE_WEIGHTS['nav_speed'] * nav_speed,
         1)
-
-
-def finalize_scores(rows, reference_lengths, nav_timeout):
-    """Fill in reference_length_m/length_ratio/score once reference_lengths is known.
-
-    reference_lengths maps goal_label -> the stock default planner's own
-    path_length_m for that goal (built from that world's 'default' combo,
-    always run first). Falls back to straight-line distance for any goal
-    the default planner itself couldn't solve, so scoring never breaks.
-    """
-    for row in rows:
-        fallback = row.pop('_fallback_straight_m', '')
-        if not row['plan_success']:
-            row['reference_length_m'] = ''
-            row['length_ratio'] = ''
-        else:
-            ref = reference_lengths.get(row['goal_label'])
-            if ref is None:
-                print(f'    WARNING: no reference length for goal "{row["goal_label"]}" '
-                      f'in {row["world"]} (default planner didn\'t solve it) -- '
-                      f'falling back to straight-line distance.')
-                ref = fallback
-            row['reference_length_m'] = ref
-            row['length_ratio'] = round(row['path_length_m'] / ref, 3) if ref and ref > 1e-6 else ''
-        row['score'] = compute_score(row, nav_timeout)
-        print(f'    "{row["goal_label"]}" score: {row["score"]}/100')
 
 
 def make_pose_stamped(navigator, x, y, yaw_deg=0.0):
@@ -216,11 +260,7 @@ def make_pose_stamped(navigator, x, y, yaw_deg=0.0):
 
 
 def run_combo(world, planner, model, goals, headless, use_rviz, startup_timeout, nav_timeout):
-    """Launch one (world, planner) combo and test it against all its goals.
-
-    Returns raw measurements only (no length_ratio/score yet) -- call
-    finalize_scores() once the world's reference lengths are known.
-    """
+    """Launch one (world, planner) combo and test it against all its goals."""
     from nav2_simple_commander.robot_navigator import BasicNavigator, TaskResult
 
     rows = []
@@ -241,11 +281,14 @@ def run_combo(world, planner, model, goals, headless, use_rviz, startup_timeout,
             rows.append({
                 'world': world, 'planner': planner, 'goal_label': '',
                 'goal_x': '', 'goal_y': '', 'plan_success': False,
-                'plan_time_sec': '', 'path_length_m': '',
-                'reference_length_m': '', 'length_ratio': '',
-                'nav_result': 'STARTUP_TIMEOUT', 'nav_time_sec': '', 'score': 0.0,
+                'plan_time_sec': '', 'path_length_m': '', 'straight_line_m': '',
+                'length_ratio': '', 'grid_optimal_m': '',
+                'nav_result': 'STARTUP_TIMEOUT', 'nav_time_sec': '',
+                'score': 0.0,
             })
             return rows
+
+        grid_view = _load_grid_view(navigator)
 
         for goal_spec in goals:
             label = goal_spec.get('label', '')
@@ -261,11 +304,18 @@ def run_combo(world, planner, model, goals, headless, use_rviz, startup_timeout,
             if plan_success:
                 length = path_length(path)
                 p0 = path.poses[0].pose.position
-                fallback_straight = math.hypot(gx - p0.x, gy - p0.y)
+                straight = math.hypot(gx - p0.x, gy - p0.y)
+                ratio = (length / straight) if straight > 1e-6 else ''
             else:
-                length = fallback_straight = ''
+                length = straight = ratio = ''
+            grid_optimal = ''
+            if plan_success and grid_view is not None:
+                opt = reference_optimal_length(grid_view, p0.x, p0.y, gx, gy)
+                if opt is not None:
+                    grid_optimal = round(opt, 3)
             print(f'    plan: success={plan_success} time={plan_time:.2f}s '
-                  f'length={length if length == "" else round(length, 2)}')
+                  f'length={length if length == "" else round(length, 2)} '
+                  f'grid_optimal={grid_optimal}')
 
             # --- full navigation metrics (NavigateToPose) ---
             nav_start = time.time()
@@ -294,9 +344,13 @@ def run_combo(world, planner, model, goals, headless, use_rviz, startup_timeout,
                 'goal_x': gx, 'goal_y': gy,
                 'plan_success': plan_success, 'plan_time_sec': round(plan_time, 3),
                 'path_length_m': round(length, 3) if length != '' else '',
+                'straight_line_m': round(straight, 3) if straight != '' else '',
+                'length_ratio': round(ratio, 3) if ratio != '' else '',
+                'grid_optimal_m': grid_optimal,
                 'nav_result': nav_result, 'nav_time_sec': round(nav_time, 3),
-                '_fallback_straight_m': round(fallback_straight, 3) if fallback_straight != '' else '',
             }
+            row['score'] = compute_score(row, nav_timeout)
+            print(f'    score: {row["score"]}/100')
             rows.append(row)
     finally:
         try:
@@ -310,8 +364,8 @@ def run_combo(world, planner, model, goals, headless, use_rviz, startup_timeout,
 
 FIELDNAMES = [
     'world', 'planner', 'goal_label', 'goal_x', 'goal_y',
-    'plan_success', 'plan_time_sec', 'path_length_m', 'reference_length_m',
-    'length_ratio', 'nav_result', 'nav_time_sec', 'score',
+    'plan_success', 'plan_time_sec', 'path_length_m', 'straight_line_m',
+    'length_ratio', 'grid_optimal_m', 'nav_result', 'nav_time_sec', 'score',
 ]
 
 SUMMARY_FIELDNAMES = [
@@ -384,7 +438,7 @@ def main():
     parser.add_argument('--startup-timeout', type=float, default=240.0,
                          help='world2_house (turtlebot3_house) alone can take ~2.5min '
                               'to spawn on first load; default is generous to cover that')
-    parser.add_argument('--nav-timeout', type=float, default=60.0)
+    parser.add_argument('--nav-timeout', type=float, default=90.0)
     parser.add_argument('--out', default=None,
                          help='CSV path (default: src/tools/results/benchmark.csv). '
                               'Appended to, not overwritten, if it already exists.')
@@ -406,39 +460,13 @@ def main():
     all_rows = []
     try:
         for world in args.worlds:
-            goals = goals_by_world.get(world, [])
-
-            # Reference lengths for path_efficiency scoring come from the
-            # stock 'default' planner's own path per goal -- always run
-            # first for this world, even if the caller didn't ask for
-            # 'default', since every other planner's ratio is computed
-            # against it (see finalize_scores()).
-            print(f'\n=== {world}: building reference path lengths (default planner) ===')
-            default_rows = run_combo(
-                world, 'default', args.model, goals,
-                headless=not args.gazebo,
-                use_rviz=args.rviz,
-                startup_timeout=args.startup_timeout,
-                nav_timeout=args.nav_timeout)
-            reference_lengths = {
-                row['goal_label']: row['path_length_m']
-                for row in default_rows
-                if row['plan_success'] and row['path_length_m'] != ''
-            }
-            finalize_scores(default_rows, reference_lengths, args.nav_timeout)
-            if 'default' in args.planners:
-                all_rows.extend(default_rows)
-
             for planner in args.planners:
-                if planner == 'default':
-                    continue
                 rows = run_combo(
-                    world, planner, args.model, goals,
+                    world, planner, args.model, goals_by_world.get(world, []),
                     headless=not args.gazebo,
                     use_rviz=args.rviz,
                     startup_timeout=args.startup_timeout,
                     nav_timeout=args.nav_timeout)
-                finalize_scores(rows, reference_lengths, args.nav_timeout)
                 all_rows.extend(rows)
     finally:
         rclpy.shutdown()
