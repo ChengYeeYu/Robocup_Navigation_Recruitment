@@ -25,8 +25,11 @@ ALL_PLANNERS = ['default', 'cpp_custom', 'python_custom']
 # planner. Failure (no plan, or nav doesn't SUCCEED) scores 0 -- a planner
 # that can't reliably finish the task shouldn't score decently just for
 # being fast on the runs it does complete. Successful runs are scored on:
-#   path_efficiency -- how direct the path is (100 / length_ratio); the
-#     core "is this a good plan" signal, weighted highest.
+#   path_efficiency -- how close the path length is to the grid-optimal
+#     (shortest 8-connected free-cell) path: 100 * grid_optimal_m /
+#     path_length_m, falling back to the straight-line ratio only if the
+#     grid optimum can't be computed. The core "is this a good plan"
+#     signal, weighted highest.
 #   plan_speed -- scaled against the ~10s budget already stated in
 #     README's planner rules ("must return within ~10 seconds").
 #   nav_speed -- scaled against --nav-timeout.
@@ -54,17 +57,39 @@ def load_start_pose(world):
 
 
 def launch_stack(world, planner, model, headless, use_rviz):
-    """Launch bringup.launch.py as a background process."""
+    """Launch bringup.launch.py as a background process.
+    """
+    os.makedirs(RESULTS_DIR, exist_ok=True)
+    log_path = os.path.join(RESULTS_DIR, f'stack_{world}_{planner}.log')
     cmd = [
         'ros2', 'launch', 'bringup', 'bringup.launch.py',
         f'world:={world}', f'planner:={planner}', f'model:={model}',
         f'use_rviz:={"true" if use_rviz else "false"}',
         f'headless:={"true" if headless else "false"}',
     ]
-    proc = subprocess.Popen(
-        cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        preexec_fn=os.setsid, cwd=REPO_ROOT)
+    with open(log_path, 'w') as logf:
+        proc = subprocess.Popen(
+            cmd, stdout=logf, stderr=subprocess.STDOUT,
+            preexec_fn=os.setsid, cwd=REPO_ROOT)
+    proc.stack_log_path = log_path
     return proc
+
+
+def _planner_error_hint(proc):
+    """Return the planner node's logged traceback if it raised, else ''.
+    """
+    path = getattr(proc, 'stack_log_path', None)
+    if not path or not os.path.exists(path):
+        return ''
+    try:
+        with open(path, errors='replace') as f:
+            text = f.read()
+    except OSError:
+        return ''
+    marker = 'generate_path() raised an exception'
+    if marker in text:
+        return text[text.rindex(marker):][:1000].rstrip()
+    return ''
 
 
 def shutdown_stack(proc, grace_sec=20):
@@ -156,12 +181,83 @@ def path_length(path):
     return sum(math.hypot(x2 - x1, y2 - y1) for (x1, y1), (x2, y2) in zip(pts, pts[1:]))
 
 
+def reference_optimal_length(gv, sx, sy, gx, gy):
+    """Shortest 8-connected grid path length (m) over free cells, start->goal.
+
+    The geometric grid optimum -- what the best possible planner could return
+    on this map. Used to score path efficiency against an *achievable* target
+    instead of the (unreachable-on-a-grid) Euclidean straight line. None if
+    either endpoint is blocked or no path exists.
+    """
+    import heapq
+    start = gv.world_to_grid(sx, sy)
+    goal = gv.world_to_grid(gx, gy)
+    if gv.is_occupied(*goal) or gv.is_occupied(*start):
+        return None
+    res = gv.resolution
+    diag = math.sqrt(2)
+    nbrs = [(1, 0, 1.0), (-1, 0, 1.0), (0, 1, 1.0), (0, -1, 1.0),
+            (1, 1, diag), (1, -1, diag), (-1, 1, diag), (-1, -1, diag)]
+
+    def h(c):
+        return math.hypot(c[0] - goal[0], c[1] - goal[1]) * res
+
+    g = {start: 0.0}
+    open_heap = [(h(start), start)]
+    while open_heap:
+        _, cur = heapq.heappop(open_heap)
+        if cur == goal:
+            return g[cur]
+        for dx, dy, step in nbrs:
+            nxt = (cur[0] + dx, cur[1] + dy)
+            if gv.is_occupied(*nxt):
+                continue
+            tentative = g[cur] + step * res
+            if nxt not in g or tentative < g[nxt]:
+                g[nxt] = tentative
+                heapq.heappush(open_heap, (tentative + h(nxt), nxt))
+    return None
+
+
+def _load_grid_view(navigator, timeout_sec=10.0):
+    """Subscribe to the static /map and wrap it; None if unavailable."""
+    import rclpy
+    from nav_msgs.msg import OccupancyGrid
+    from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy
+    from planner_py.occupancy_grid_view import OccupancyGridView
+
+    holder = {}
+    qos = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL,
+                     reliability=ReliabilityPolicy.RELIABLE)
+    sub = navigator.create_subscription(
+        OccupancyGrid, '/map', lambda m: holder.setdefault('m', m), qos)
+    deadline = time.time() + timeout_sec
+    while 'm' not in holder and time.time() < deadline:
+        rclpy.spin_once(navigator, timeout_sec=0.5)
+    navigator.destroy_subscription(sub)
+    if 'm' not in holder:
+        print('  (no /map received; grid-optimal scoring off, using straight-line)')
+        return None
+    try:
+        return OccupancyGridView(holder['m'])
+    except Exception as exc:  # noqa: BLE001
+        print(f'  (grid-optimal scoring off: {exc})')
+        return None
+
+
 def compute_score(row, nav_timeout):
     """Compute a goal's 0-100 weighted quality score (see SCORE_WEIGHTS above)."""
     if not row['plan_success'] or row['nav_result'] != 'SUCCEEDED':
         return 0.0
-    ratio = row['length_ratio']
-    efficiency = 100.0 if ratio in ('', None) else max(0.0, min(100.0, 100.0 / ratio))
+    # Path efficiency vs the OPTIMAL GRID path (achievable), falling back to the
+    # old straight-line ratio if the optimal couldn't be computed.
+    opt = row.get('grid_optimal_m')
+    plen = row.get('path_length_m')
+    if isinstance(opt, (int, float)) and isinstance(plen, (int, float)) and plen > 1e-6:
+        efficiency = max(0.0, min(100.0, 100.0 * opt / plen))
+    else:
+        ratio = row['length_ratio']
+        efficiency = 100.0 if ratio in ('', None) else max(0.0, min(100.0, 100.0 / ratio))
     plan_speed = max(0.0, min(100.0, 100.0 * (1.0 - row['plan_time_sec'] / PLAN_TIME_BUDGET_SEC)))
     nav_speed = max(0.0, min(100.0, 100.0 * (1.0 - row['nav_time_sec'] / nav_timeout)))
     return round(
@@ -208,10 +304,13 @@ def run_combo(world, planner, model, goals, headless, use_rviz, startup_timeout,
                 'world': world, 'planner': planner, 'goal_label': '',
                 'goal_x': '', 'goal_y': '', 'plan_success': False,
                 'plan_time_sec': '', 'path_length_m': '', 'straight_line_m': '',
-                'length_ratio': '', 'nav_result': 'STARTUP_TIMEOUT', 'nav_time_sec': '',
+                'length_ratio': '', 'grid_optimal_m': '',
+                'nav_result': 'STARTUP_TIMEOUT', 'nav_time_sec': '',
                 'score': 0.0,
             })
             return rows
+
+        grid_view = _load_grid_view(navigator)
 
         for goal_spec in goals:
             label = goal_spec.get('label', '')
@@ -231,8 +330,23 @@ def run_combo(world, planner, model, goals, headless, use_rviz, startup_timeout,
                 ratio = (length / straight) if straight > 1e-6 else ''
             else:
                 length = straight = ratio = ''
+            grid_optimal = ''
+            if plan_success and grid_view is not None:
+                opt = reference_optimal_length(grid_view, p0.x, p0.y, gx, gy)
+                if opt is not None:
+                    grid_optimal = round(opt, 3)
             print(f'    plan: success={plan_success} time={plan_time:.2f}s '
-                  f'length={length if length == "" else round(length, 2)}')
+                  f'length={length if length == "" else round(length, 2)} '
+                  f'grid_optimal={grid_optimal}')
+            if not plan_success:
+                hint = _planner_error_hint(proc)
+                if hint:
+                    print('    !! your planner raised an exception (this is a bug '
+                          'in your planner, not the benchmark):')
+                    print('\n'.join('       ' + ln for ln in hint.splitlines()))
+                else:
+                    print(f'       (no path returned; full stack log: '
+                          f'{getattr(proc, "stack_log_path", "n/a")})')
 
             # --- full navigation metrics (NavigateToPose) ---
             nav_start = time.time()
@@ -263,6 +377,7 @@ def run_combo(world, planner, model, goals, headless, use_rviz, startup_timeout,
                 'path_length_m': round(length, 3) if length != '' else '',
                 'straight_line_m': round(straight, 3) if straight != '' else '',
                 'length_ratio': round(ratio, 3) if ratio != '' else '',
+                'grid_optimal_m': grid_optimal,
                 'nav_result': nav_result, 'nav_time_sec': round(nav_time, 3),
             }
             row['score'] = compute_score(row, nav_timeout)
@@ -281,7 +396,7 @@ def run_combo(world, planner, model, goals, headless, use_rviz, startup_timeout,
 FIELDNAMES = [
     'world', 'planner', 'goal_label', 'goal_x', 'goal_y',
     'plan_success', 'plan_time_sec', 'path_length_m', 'straight_line_m',
-    'length_ratio', 'nav_result', 'nav_time_sec', 'score',
+    'length_ratio', 'grid_optimal_m', 'nav_result', 'nav_time_sec', 'score',
 ]
 
 SUMMARY_FIELDNAMES = [
@@ -354,7 +469,7 @@ def main():
     parser.add_argument('--startup-timeout', type=float, default=240.0,
                          help='world2_house (turtlebot3_house) alone can take ~2.5min '
                               'to spawn on first load; default is generous to cover that')
-    parser.add_argument('--nav-timeout', type=float, default=60.0)
+    parser.add_argument('--nav-timeout', type=float, default=120.0)
     parser.add_argument('--out', default=None,
                          help='CSV path (default: src/tools/results/benchmark.csv). '
                               'Appended to, not overwritten, if it already exists.')

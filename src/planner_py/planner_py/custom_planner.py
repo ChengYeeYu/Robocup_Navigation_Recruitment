@@ -1,9 +1,11 @@
 """Freshie-editable path planner for the Python track."""
-from collections import deque
-
 from geometry_msgs.msg import PoseStamped
 
 from planner_py.occupancy_grid_view import OccupancyGridView
+
+
+def _heuristic(a, b):
+    return ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5
 
 
 def generate_path(
@@ -11,35 +13,26 @@ def generate_path(
     goal_pose: PoseStamped,
     grid: OccupancyGridView,
 ) -> list:
-    """BFS from start_pose to goal_pose; ordered (x, y) waypoints, empty if unreachable."""
-    start = grid.world_to_grid(start_pose.pose.position.x, start_pose.pose.position.y)
-    goal = grid.world_to_grid(goal_pose.pose.position.x, goal_pose.pose.position.y)
+    """Freshie TODO: straight-line default, replace with a real algorithm.
 
-    if grid.is_occupied(*start) or grid.is_occupied(*goal):
-        return []
+    Interpolates a straight line from start to goal and returns it as ordered
+    (x, y) waypoints. Replace this with a real search (BFS, Dijkstra, A*, ...) that uses
+    `grid` to route around obstacles -- see the README's "Suggested approach"
+    and the grid helpers (`grid.is_occupied`, `grid.world_to_grid`,
+    `grid.grid_to_world`, and the clearance-aware `grid.cost`/`grid.move_cost`).
+    """
+    sx = start_pose.pose.position.x
+    sy = start_pose.pose.position.y
+    gx = goal_pose.pose.position.x
+    gy = goal_pose.pose.position.y
 
-    visited = {start: None}   # cell -> parent cell
-    queue = deque([start])
-    neighbors = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+    interpolation_resolution = 0.1  
+    dx = gx - sx
+    dy = gy - sy
+    total_distance = (dx * dx + dy * dy) ** 0.5
+    n_steps = max(1, int(total_distance / interpolation_resolution))
 
-    while queue:
-        cur = queue.popleft()
-        if cur == goal:
-            break
-        for dx, dy in neighbors:
-            nxt = (cur[0] + dx, cur[1] + dy)
-            if nxt not in visited and not grid.is_occupied(*nxt):
-                visited[nxt] = cur
-                queue.append(nxt)
-
-    if goal not in visited:
-        return []
-
-    path_cells = []
-    node = goal
-    while node is not None:
-        path_cells.append(node)
-        node = visited[node]
-    path_cells.reverse()
-
-    return [grid.grid_to_world(gx, gy) for gx, gy in path_cells]
+    return [
+        (sx + (i / n_steps) * dx, sy + (i / n_steps) * dy)
+        for i in range(n_steps + 1)
+    ]

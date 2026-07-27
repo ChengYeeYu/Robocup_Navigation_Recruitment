@@ -67,13 +67,27 @@ apt install -y \
   build-essential \
   cmake
 
-echo "==> [4/6] rosdep init/update"
+echo "==> [4/7] rosdep init/update"
 if [[ ! -f /etc/ros/rosdep/sources.list.d/20-default.list ]]; then
   rosdep init
 fi
 sudo -u "${REAL_USER}" rosdep update
 
-echo "==> [5/6] Shell setup"
+echo "==> [5/7] Pre-fetching Gazebo models used by world2_house"
+# turtlebot3_house's model.sdf references these 4 furniture models by
+# model://<name> URI. None of them ship in any apt package -- gzserver only
+# finds them by falling back to a synchronous, blocking HTTP download from
+# GAZEBO_MODEL_DATABASE_URI on its main thread, which is what causes the
+# "Gazebo Not Responding" popup on world2_house's first launch. Fetching
+# them once now, into the real user's permanent Gazebo model cache, means
+# gzserver finds them locally from the first launch onward.
+sudo -u "${REAL_USER}" mkdir -p "${REAL_HOME}/.gazebo/models"
+for m in mailbox cafe_table first_2015_trash_can table_marble; do
+  sudo -u "${REAL_USER}" bash -c \
+    "curl -sL 'http://models.gazebosim.org/${m}/model.tar.gz' | tar -xz -C '${REAL_HOME}/.gazebo/models'"
+done
+
+echo "==> [6/7] Shell setup"
 BASHRC_LINES=$(cat <<'EOF'
 source /opt/ros/humble/setup.bash
 export TURTLEBOT3_MODEL=burger
@@ -100,7 +114,7 @@ else
   echo "-------------------------------------------------------------"
 fi
 
-echo "==> [6/6] Done."
+echo "==> [7/7] Done."
 echo "Open a new terminal (or 'source ~/.bashrc') then verify with:"
-echo "  ros2 --version"
+echo "  echo \$ROS_DISTRO"
 echo "  gazebo --version"

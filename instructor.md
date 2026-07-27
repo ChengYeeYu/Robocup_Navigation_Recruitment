@@ -54,12 +54,17 @@ world's layout changes).
    colcon build --symlink-install --packages-select bringup
    ```
 6. **Verify the spawn point is still valid in the new map.** SLAM maps can
-   shift slightly as later loop-closure corrections land, and the exact
-   cell under the robot's start pose can end up marked occupied even
-   though the robot really started there (hit this building `world2_house`'s
-   map -- the stock TB3 spawn point (-2.0, -0.5) ended up on an occupied
-   cell in the final map, so we moved the spawn to (0.0, 0.0) instead).
-   Sanity check after any remap:
+   shift slightly as later loop-closure corrections land, and the cell under
+   the robot's start pose can end up marked occupied -- or just too close to
+   a wall -- even though the robot really started there. This bit
+   `world2_house` twice: the stock TB3 spawn (-2.0, -0.5) landed on an
+   occupied cell, and its replacement (0.0, 0.0) sat only ~0.05 m from a wall
+   (< the burger's 0.105 m radius), so the robot spawned *inside* wall
+   inflation -- it couldn't move (every nav aborted) and Gazebo's physics
+   flung it over. The spawn is now **(0.25, -2.33)**, the most open spot in
+   the house (~2.2 m clearance). Rule of thumb: pick a spawn whose clearance
+   to the nearest wall comfortably exceeds the robot radius, and confirm all
+   goals are reachable from it. Sanity check after any remap:
    ```bash
    ros2 launch bringup bringup.launch.py world:=world1_arena use_rviz:=false
    # in another terminal, after it's up:
@@ -121,9 +126,23 @@ components (weights live in `SCORE_WEIGHTS` near the top of
 
 | Component | Weight | Formula | Rewards |
 |---|---|---|---|
-| Path efficiency | 40% | `100 / length_ratio` | A direct path, close to straight-line distance |
+| Path efficiency | 40% | `100 * grid_optimal_m / path_length_m` | A direct path, close to the **grid-optimal** length for that goal -- the shortest 8-connected free-cell path on the static map (see below). Not straight-line distance, since that's rarely achievable once walls are in the way |
 | Planning speed | 30% | `100 * (1 - plan_time_sec / 10)` | Returning a plan quickly (10s budget matches README's planner rules) |
 | Navigation speed | 30% | `100 * (1 - nav_time_sec / nav_timeout)` | Actually driving there quickly |
+
+**Where the reference length comes from:** for each goal, `benchmark.py`
+computes `grid_optimal_m` -- the shortest 8-connected path over free cells
+of the static `/map`, start to goal (an offline A* in
+`reference_optimal_length()`). This is the geometric optimum: what the best
+possible planner could achieve on this map, computed once and needing no
+tuning. Efficiency is `path_length_m` measured against it, so a planner that
+returns near-optimal paths scores near 100. This replaced an earlier design
+that ran the stock `default` (NavFn) planner first and used *its* path as the
+reference -- that coupled the yardstick to costmap/controller tuning and
+scored everyone 0 on any goal NavFn itself couldn't reach. If the grid
+optimum can't be computed for a goal (e.g. `/map` didn't arrive, or an
+endpoint is blocked), that goal falls back to the straight-line ratio
+(`100 / length_ratio`, where `length_ratio = path_length_m / straight_line_m`).
 
 Each component is clamped to `[0, 100]` before weighting, so a slow-but-direct
 path and a fast-but-wandering path can end up with similar scores --
@@ -149,20 +168,24 @@ world            # world this row is about
 planner          # default / cpp_custom / python_custom
 
 # --- detail rows only ---
-goal_label       # label from src/tools/goals.yaml
-goal_x, goal_y   # goal position, 'map' frame, meters
-plan_success     # True/False -- did ComputePathToPose return a path
-plan_time_sec    # time for that ComputePathToPose call to return
-path_length_m    # arc length of the returned path
-straight_line_m  # straight-line distance, path's actual start to goal
-length_ratio     # path_length_m / straight_line_m
-nav_result       # SUCCEEDED / FAILED / CANCELED / TIMEOUT
-nav_time_sec     # time from sending the NavigateToPose goal to it finishing
-score            # 0-100, this goal's weighted quality score -- see
-                 # SCORE_WEIGHTS in benchmark.py. 0 if plan_success is
-                 # False or nav_result isn't SUCCEEDED; otherwise a
-                 # weighted mix of path efficiency, planning speed, and
-                 # navigation speed.
+goal_label          # label from src/tools/goals.yaml
+goal_x, goal_y      # goal position, 'map' frame, meters
+plan_success        # True/False -- did ComputePathToPose return a path
+plan_time_sec       # time for that ComputePathToPose call to return
+path_length_m       # arc length of the returned path
+straight_line_m     # straight-line start->goal distance (fallback reference)
+length_ratio        # path_length_m / straight_line_m
+grid_optimal_m      # shortest 8-connected free-cell path length on the static
+                    # map (the grid optimum); the primary efficiency reference.
+                    # Blank if it couldn't be computed (then scoring falls back
+                    # to length_ratio)
+nav_result          # SUCCEEDED / FAILED / CANCELED / TIMEOUT
+nav_time_sec        # time from sending the NavigateToPose goal to it finishing
+score               # 0-100, this goal's weighted quality score -- see
+                    # SCORE_WEIGHTS in benchmark.py. 0 if plan_success is
+                    # False or nav_result isn't SUCCEEDED; otherwise a
+                    # weighted mix of path efficiency, planning speed, and
+                    # navigation speed.
 
 # --- summary rows only ---
 goals               # number of goals tested for this world/planner
@@ -195,6 +218,35 @@ combination launches and tears down its own Gazebo + Nav2 stack, so a full
 
 ---
 
+## Robustness checks
+
+The benchmark measures the happy path (good goals, does it plan a direct path
+and drive there). It does **not** catch a planner that crashes, hangs, or
+fabricates a route on degenerate input. Two separate tools cover that, one per
+track -- both report PASS/FAIL per case and a `points`-scaled score:
+
+| Track | Tool | How it works | Speed |
+|---|---|---|---|
+| Python | `src/tools/robustness_check.py` | Imports the candidate's `generate_path()` and calls it in-process against 5 edge cases on a synthetic map. Each case runs in a subprocess with a timeout, so an infinite loop is caught as HANG. | ~1s, no sim |
+| C++ | `src/tools/robustness_check_cpp.py` | Launches the `cpp_custom` stack and fires the same 5 cases at the real compiled plugin via the `ComputePathToPose` action; edge-case coordinates (a wall cell, a walled-off free cell) are discovered from the live `/map`. Distinguishes a clean empty return from a CRASH by checking `planner_server` is still `active`, and a HANG via a per-case `--timeout`. | needs sim (~30-90s startup + a few s/case) |
+
+```bash
+python3 src/tools/robustness_check.py                      # Python submission
+python3 src/tools/robustness_check_cpp.py                  # C++ submission
+python3 src/tools/robustness_check_cpp.py --world world1_arena --timeout 15
+```
+
+The 5 cases (same for both): **unreachable** (a free goal walled off from the
+start -> must return empty), **goal_on_wall**, **goal_out_map** (both -> empty),
+**start_on_wall** and **goal==start** (must not crash/hang; any well-formed
+return is fine). Both starter planners are a plain straight line, so both score
+**2/5** out of the box -- they fabricate paths through walls and off the map by
+design. A real search that gives up cleanly on impossible goals scores higher;
+that gap is the point of the check. Scale `--points` to whatever you want these
+worth in the overall grade.
+
+---
+
 ## How the launch system works (short version)
 
 `bringup.launch.py` is the single entry point for all 3 planner modes. It
@@ -219,6 +271,8 @@ robocup_nav_rec/
     │   ├── install_dependencies.sh   # freshie-facing: one-shot setup for a bare machine
     │   ├── ci_build_check.sh         # local pre-flight build + lint check
     │   ├── benchmark.py              # grading/self-check benchmark, see above
+    │   ├── robustness_check.py       # Python-track edge-case check (in-process)
+    │   ├── robustness_check_cpp.py   # C++-track edge-case check (live stack)
     │   ├── goals.yaml                # test goals per world, used by benchmark.py
     │   ├── results/                  # benchmark.py output (detail + summary CSVs)
     │   └── config/                   # per-world spawn pose + description, used by benchmark.py
