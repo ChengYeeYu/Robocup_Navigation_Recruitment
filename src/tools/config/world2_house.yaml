@@ -1,4 +1,4 @@
 # Official TurtleBot3 "turtlebot3_house"; no walls: list needed.
 name: world2_house
 description: "Official TurtleBot3 'turtlebot3_house' floorplan. Harder than world1_arena."
-robot_start_pose: { x: 0.25, y: -2.33, yaw_deg: 0 }
+robot_start_pose: { x: -1.4073, y: 3.8644, yaw_deg: 0 }
