@@ -244,18 +244,26 @@ This is a standard [Nav2 planner plugin](https://navigation.ros.org/plugin_tutor
 
 ## 7. Check your planner's quality
 
+This launches Gazebo headless, runs your planner against every start/goal
+pair for the world(s) you pick, and prints a score -- run it once your
+planner works to see how it's doing. The example below checks the C++
+track on `world1_arena` only; swap in your own track and worlds when
+checking for real ([S8](#8-what-to-submit) checks both worlds).
+
 ```bash
 python3 src/tools/benchmark.py --worlds world1_arena --planners cpp_custom
 ```
 
-| Argument     | What it controls                    | Options                                                                             |
-| ------------ | ----------------------------------- | ----------------------------------------------------------------------------------- |
-| `--worlds`   | which world(s) to test on           | space-separated, e.g. `world1_arena world2_house` (default: `world1_arena`)         |
-| `--planners` | which planner(s) to test            | space-separated, from `default`, `cpp_custom`, `python_custom` (default: `default`) |
-| `--model`    | which TurtleBot3 robot is simulated | `burger` (default), `waffle`, or `waffle_pi`                                        |
-| `--gazebo`   | show the Gazebo GUI                 | flag; default: hidden (headless)                                                    |
-| `--rviz`     | also show RViz                      | flag; default: off                                                                  |
-| `--out`      | where to write the results          | file path; default: `src/tools/results/benchmark.csv` (appended to)                 |
+You can override any of these arguments, e.g.
+`python3 src/tools/benchmark.py --worlds world1_arena world2_house --planners python_custom`:
+
+| Argument     | What it controls           | Options                                                                             |
+| ------------ | -------------------------- | ----------------------------------------------------------------------------------- |
+| `--worlds`   | which world(s) to test on  | space-separated, e.g. `world1_arena world2_house` (default: `world1_arena`)         |
+| `--planners` | which planner(s) to test   | space-separated, from `default`, `cpp_custom`, `python_custom` (default: `default`) |
+| `--gazebo`   | show the Gazebo GUI        | flag; default: hidden (headless)                                                    |
+| `--rviz`     | also show RViz             | flag; default: off                                                                  |
+| `--out`      | where to write the results | file path; default: `src/tools/results/benchmark.csv` (appended to)                 |
 
 Prints results to the terminal and appends them to the CSV (`score` column,
 0-100 per goal). Don't run this at the same time as `bringup.launch.py` --
