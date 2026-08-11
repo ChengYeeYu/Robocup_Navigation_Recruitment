@@ -1,0 +1,31 @@
+{
+  "name": "ROS 2 Humble Dev Container",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+  "runArgs": [
+    "--net=host",
+    "--ipc=host",
+    "--pid=host",
+    "--privileged"
+  ],
+  "containerEnv": {
+    "DISPLAY": "${localEnv:DISPLAY}",
+    "QT_X11_NO_MITSHM": "1"
+  },
+  "mounts": [
+    "source=/tmp/.X11-unix,target=/tmp/.X11-unix,type=bind,consistency=cached"
+  ],
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-iot.vscode-ros",
+        "ms-vscode.cpptools-extension-pack",
+        "ms-azuretools.vscode-docker",
+        "redhat.vscode-xml"
+      ]
+    }
+  },
+  "postCreateCommand": "rosdep update && rosdep install --from-paths src --ignore-src -y -r && colcon build --symlink-install"
+}
