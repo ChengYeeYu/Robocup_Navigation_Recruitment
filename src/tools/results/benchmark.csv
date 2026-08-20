@@ -1,0 +1,10 @@
+run_at,row_type,world,planner,goal_label,goal_x,goal_y,plan_success,plan_time_sec,path_length_m,straight_line_m,length_ratio,grid_optimal_m,nav_result,nav_time_sec,score,goals,plan_success_rate,nav_success_rate,avg_plan_time_sec,avg_nav_time_sec,avg_length_ratio,avg_score
+2026-08-19 12:37:25,detail,world1_arena,cpp_custom,near_obstacle,1.5,1.5,True,0.021,2.101,2.1,1.0,2.101,SUCCEEDED,11.813,97.0,,,,,,,
+2026-08-19 12:37:25,detail,world1_arena,cpp_custom,open_corner,4.0,1.0,True,0.004,2.774,2.681,1.035,2.774,SUCCEEDED,12.262,96.9,,,,,,,
+2026-08-19 12:37:25,summary,world1_arena,cpp_custom,,,,,,,,,,,,,2,2/2,2/2,0.013,12.038,1.018,97.0
+2026-08-19 12:45:17,detail,world2_house,cpp_custom,point_A,6.0450439453125,0.997012197971344,True,0.028,10.001,7.948,1.258,9.801,SUCCEEDED,74.078,80.6,,,,,,,
+2026-08-19 12:45:17,detail,world2_house,cpp_custom,point_B,3.625,1.045,True,0.009,2.191,2.152,1.018,2.191,SUCCEEDED,16.913,95.7,,,,,,,
+2026-08-19 12:45:17,detail,world2_house,cpp_custom,point_C,-2.7150087356567383,4.028862476348877,True,0.012,8.663,7.189,1.205,8.381,SUCCEEDED,46.464,87.0,,,,,,,
+2026-08-19 12:45:17,detail,world2_house,cpp_custom,point_D,-6.042925834655762,3.530674695968628,True,0.009,3.545,3.437,1.031,3.545,SUCCEEDED,22.813,94.3,,,,,,,
+2026-08-19 12:45:17,detail,world2_house,cpp_custom,point_E,-6.3945465087890625,-2.7847845554351807,True,0.009,6.628,6.405,1.035,6.628,SUCCEEDED,37.264,90.7,,,,,,,
+2026-08-19 12:45:17,summary,world2_house,cpp_custom,,,,,,,,,,,,,5,5/5,5/5,0.013,39.506,1.109,89.7
