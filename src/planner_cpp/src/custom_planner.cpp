@@ -44,6 +44,10 @@ void CustomPlanner::configure(
     node, name_ + ".interpolation_resolution", rclcpp::ParameterValue(0.1));
   node->get_parameter(name_ + ".interpolation_resolution", interpolation_resolution_);
 
+  nav2_util::declare_parameter_if_not_declared(
+    node, name_ + ".costmap_weight", rclcpp::ParameterValue(1.0));
+  node->get_parameter(name_ + ".costmap_weight", costmap_weight_);
+
   RCLCPP_INFO(
     node->get_logger(), "Configured CustomPlanner \"%s\" (frame: %s)",
     name_.c_str(), global_frame_.c_str());
@@ -111,11 +115,14 @@ double CustomPlanner::heuristics(int current_x, int current_y, int next_x, int n
   return h;
 }
 
-// Combines the cost-so-far (g) and the heuristic (h) into the A* priority f = g + h.
-double CustomPlanner::stepCost(double h, double g) const
+// Cost of taking one step of the given geometric distance, scaled up by how
+// costly the destination cell is. costmap is 0..252 here (traversable() has
+// already excluded inflated/lethal/unknown cells), so it's normalized to
+// 0..1 before being weighted.
+double CustomPlanner::stepCost(double distance, double costmap) const
 {
-  double f = g + h;
-  return f;
+  const double normalized = costmap / 252.0;
+  return distance * (1.0 + costmap_weight_ * normalized);
 }
 
 namespace
@@ -234,7 +241,7 @@ std::vector<geometry_msgs::msg::PoseStamped> CustomPlanner::computePlan(
   g[start_idx] = 0.0;
   open.push(
     {start_idx, start_xi, start_yi, 0.0,
-      stepCost(heuristics(start_xi, start_yi, goal_xi, goal_yi), 0.0)});
+      heuristics(start_xi, start_yi, goal_xi, goal_yi)});
 
   // 8 neighbours: 4 cardinal, then 4 diagonal
   const int dx8[8] = {1, -1, 0, 0, 1, 1, -1, -1};
@@ -273,15 +280,19 @@ std::vector<geometry_msgs::msg::PoseStamped> CustomPlanner::computePlan(
         continue;
       }
 
-      // Step cost is pure geometry: 1 for straight, sqrt(2) for diagonal.
-      const double tentative_g = cur.g + (diagonal ? std::sqrt(2.0) : 1.0);
+      // Step cost is geometric distance scaled by how costly the destination
+      // cell is: 1 (or sqrt(2) diagonally) for a clear cell, more near obstacles.
+      const double distance = diagonal ? std::sqrt(2.0) : 1.0;
+      const unsigned char neighbor_cost =
+        costmap_->getCost(static_cast<unsigned int>(nx), static_cast<unsigned int>(ny));
+      const double tentative_g = cur.g + stepCost(distance, neighbor_cost);
 
       // Strictly better route found? Record it and queue the cell.
       if (tentative_g < g[n_idx]) {
         g[n_idx] = tentative_g;
         parent[n_idx] = cur.idx;
         const double h = heuristics(nx, ny, goal_xi, goal_yi);
-        open.push({n_idx, nx, ny, tentative_g, stepCost(h, tentative_g)});
+        open.push({n_idx, nx, ny, tentative_g, tentative_g + h});
       }
     }
   }

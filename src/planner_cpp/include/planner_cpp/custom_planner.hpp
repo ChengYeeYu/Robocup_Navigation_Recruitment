@@ -51,7 +51,7 @@ protected:
   // TODO(freshie): plan start->goal using costmap_ (worldToMap/mapToWorld/
   // getCost). Return an ordered, stamped vector; empty if no path found.
   double heuristics(int current_x, int current_y, int next_x, int next_y) const;
-  double stepCost(double h, double g) const;
+  double stepCost(double distance, double costmap) const;
   std::vector<geometry_msgs::msg::PoseStamped> computePlan(
     const geometry_msgs::msg::PoseStamped & start,
     const geometry_msgs::msg::PoseStamped & goal);
@@ -61,6 +61,7 @@ protected:
   std::shared_ptr<tf2_ros::Buffer> tf_;
   std::string global_frame_, name_;
   double interpolation_resolution_;
+  double costmap_weight_;
 };
 
 }  // namespace planner_cpp
